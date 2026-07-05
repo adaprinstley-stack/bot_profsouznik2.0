@@ -1,20 +1,24 @@
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import CommandStart
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
+from fastapi import FastAPI, Request
+import requests
+
+app = FastAPI()
+
+# 🔐 токен MAX
+TOKEN = "f9LHodD0cOIMUZmyfq_t-lNtX7DWfXMROP-dIxOkaWN7QjlOXx1NQ3EIW9JOt9wAS1bRLikxuEVswptZR1GU"
+BASE_URL = "https://platform-api.max.ru"
 
 
-from questions import QUESTIONS
+# -------------------------
+# 📊 логика теста
+# -------------------------
 
-bot = Bot("f9LHodD0cOIMUZmyfq_t-lNtX7DWfXMROP-dIxOkaWN7QjlOXx1NQ3EIW9JOt9wAS1bRLikxuEVswptZR1GU")
-dp = Dispatcher(storage=MemoryStorage())
-
-
-class TestState(StatesGroup):
-    answering = State()
-
+QUESTIONS = [
+    "Как часто вы чувствуете усталость на работе?",
+    "Есть ли ощущение, что работа стала бессмысленной?",
+    "Часто ли вы раздражаетесь на учеников?",
+    "Есть ли проблемы со сном из-за работы?",
+    "Чувствуете ли вы эмоциональное опустошение?"
+]
 
 answers = {
     "Никогда": 0,
@@ -24,206 +28,133 @@ answers = {
     "Постоянно": 4
 }
 
-
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📝 Пройти тест")],
-        [KeyboardButton(text="🧘 Практики самопомощи")],
-        [KeyboardButton(text="❤️ Чек-ин настроения")]
-    ],
-    resize_keyboard=True
-)
+# простое хранилище (в памяти)
+user_state = {}
 
 
-test_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Никогда")],
-        [KeyboardButton(text="Редко")],
-        [KeyboardButton(text="Иногда")],
-        [KeyboardButton(text="Часто")],
-        [KeyboardButton(text="Постоянно")]
-    ],
-    resize_keyboard=True
-)
+# -------------------------
+# 📤 отправка сообщения
+# -------------------------
+def send_message(user_id: str, text: str, buttons=None):
+    url = f"{BASE_URL}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "user_id": user_id,
+        "text": text,
+        "attachments": buttons or []
+    }
+
+    requests.post(url, json=payload, headers=headers)
 
 
-@dp.message(CommandStart())
-async def start(message: Message):
-
-    text = """
-🤝 Добро пожаловать в бот "Учитель в ресурсе"!
-
-Этот бот поможет оценить риск эмоционального выгорания и получить рекомендации по самопомощи.
-
-⚠️ Тест не является медицинской диагностикой.
-"""
-
-    await message.answer(text, reply_markup=main_menu)
-
-
-@dp.message(F.text == "📝 Пройти тест")
-async def start_test(message: Message, state: FSMContext):
-
-    await state.set_state(TestState.answering)
-
-    await state.update_data(index=0, score=0)
-
-    await message.answer(
-        QUESTIONS[0],
-        reply_markup=test_keyboard
-    )
-
-
-@dp.message(TestState.answering)
-async def process_answer(message: Message, state: FSMContext):
-
-    if message.text not in answers:
-        return
-
-    data = await state.get_data()
-
-    score = data["score"] + answers[message.text]
-    index = data["index"] + 1
-
-    if index == len(QUESTIONS):
-
-        await state.clear()
-
-        result = get_result(score)
-
-        await message.answer(
-            result,
-            reply_markup=main_menu
-        )
-
-        return
-
-    await state.update_data(
-        index=index,
-        score=score
-    )
-
-    await message.answer(
-        QUESTIONS[index]
-    )
-
-
+# -------------------------
+# 📊 результат теста
+# -------------------------
 def get_result(score):
 
     if score <= 12:
-
-        return f"""
-🟢 Ваш результат: {score} баллов
+        return f"""🟢 Результат: {score}
 
 Низкий риск выгорания.
-
-Продолжайте соблюдать баланс между работой и отдыхом.
-
-✅ полноценный сон
-✅ физическая активность
-✅ хобби
-✅ поддержка коллег
-
-Профилактика всегда лучше восстановления.
-"""
+Продолжайте балансировать работу и отдых."""
 
     elif score <= 25:
-
-        return f"""
-🟡 Ваш результат: {score} баллов
+        return f"""🟡 Результат: {score}
 
 Средний риск выгорания.
-
-Рекомендуется:
-
-✅ сократить дополнительную нагрузку
-✅ выделять время без работы
-✅ использовать техники расслабления
-✅ обсуждать сложности с коллегами
-
-Если состояние сохраняется долго, обратитесь к специалисту.
-"""
+Рекомендуется снизить нагрузку и отдыхать."""
 
     else:
+        return f"""🔴 Результат: {score}
 
-        return f"""
-🔴 Ваш результат: {score} баллов
-
-Высокий риск эмоционального выгорания.
-
-Помните: это не слабость, а реакция организма на перегрузку.
-
-Рекомендуется:
-
-✅ обратиться за поддержкой
-✅ обсудить снижение нагрузки
-✅ наладить режим сна
-✅ проконсультироваться с психологом
-
-Берегите себя ❤️
-"""
+Высокий риск выгорания.
+Важно обратиться за поддержкой и снизить нагрузку."""
 
 
-@dp.message(F.text == "🧘 Практики самопомощи")
-async def self_help(message: Message):
+# -------------------------
+# 📩 webhook MAX
+# -------------------------
+@app.post("/webhook")
+async def webhook(request: Request):
 
-    text = """
-🧘 Практики самопомощи
+    data = await request.json()
 
-🌬 Дыхание 4-4-6
-Вдох 4 секунды
-Задержка 4 секунды
-Выдох 6 секунд
+    if data.get("update_type") != "message_created":
+        return {"ok": True}
 
-☕ После уроков:
-✅ выпить воды
-✅ пройтись 10 минут
-✅ не открывать рабочий чат хотя бы час
+    msg = data.get("message", {})
+    user_id = msg.get("user_id")
+    text = msg.get("text", "").strip()
 
-💤 Сон:
-✅ без телефона за час до сна
-✅ проветривать комнату
-✅ ложиться в одно время
-"""
+    # -------------------------
+    # 🟢 старт
+    # -------------------------
+    if text == "/start":
 
-    await message.answer(text)
+        user_state[user_id] = {
+            "index": 0,
+            "score": 0
+        }
 
+        send_message(
+            user_id,
+            "🤝 Бот 'Учитель в ресурсе'\n\nНажмите 'Начать тест' или напишите 1",
+        )
+        return {"ok": True}
 
-@dp.message(F.text == "❤️ Чек-ин настроения")
-async def mood(message: Message):
+    # -------------------------
+    # 🟢 старт теста
+    # -------------------------
+    if text == "1":
 
-    await message.answer("""
-Как вы себя чувствуете сегодня?
+        user_state[user_id] = {
+            "index": 0,
+            "score": 0
+        }
 
-😊 В ресурсе
-😐 Устал(а)
-😔 На пределе
-""")
+        send_message(user_id, QUESTIONS[0])
+        return {"ok": True}
 
+    # -------------------------
+    # 🟢 если пользователь проходит тест
+    # -------------------------
+    if user_id in user_state:
 
-@dp.message(F.text == "😊 В ресурсе")
-async def mood_good(message: Message):
+        state = user_state[user_id]
 
-    await message.answer(
-        "Отлично! Продолжайте заботиться о себе ❤️"
-    )
+        if text in answers:
 
+            state["score"] += answers[text]
+            state["index"] += 1
 
-@dp.message(F.text == "😐 Устал(а)")
-async def mood_mid(message: Message):
+            # если тест закончился
+            if state["index"] >= len(QUESTIONS):
 
-    await message.answer(
-        "Попробуйте сегодня выделить хотя бы 30 минут только для себя."
-    )
+                result = get_result(state["score"])
 
+                send_message(user_id, result)
 
-@dp.message(F.text == "😔 На пределе")
-async def mood_bad(message: Message):
+                del user_state[user_id]
+                return {"ok": True}
 
-    await message.answer(
-        "Вы не обязаны справляться в одиночку. Обратитесь за поддержкой к коллегам, близким или специалистам ❤️"
-    )
+            # следующий вопрос
+            send_message(user_id, QUESTIONS[state["index"]])
+            return {"ok": True}
 
+    # -------------------------
+    # 🟢 помощь
+    # -------------------------
+    if text == "помощь":
+        send_message(user_id, "Напишите /start чтобы начать тест")
+        return {"ok": True}
 
-if __name__ == "__main__":
-    dp.run_polling(bot)
+    # -------------------------
+    # 🟢 fallback
+    # -------------------------
+    send_message(user_id, "Напишите /start чтобы начать работу")
+    return {"ok": True}
